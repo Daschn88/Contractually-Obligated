@@ -1,0 +1,18 @@
+export function CapProgressBar({ utilization }: { utilization: number }) {
+  const getBarColor = (pct: number) => {
+    if (pct >= 100) return 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]';
+    if (pct >= 80) return 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]';
+    return 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]';
+  };
+
+  const clampedWidth = Math.min(Math.max(utilization, 0), 100);
+
+  return (
+    <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden border border-slate-700/50">
+      <div
+        className={`h-full transition-all duration-500 rounded-full ${getBarColor(utilization)}`}
+        style={{ width: `${clampedWidth}%` }}
+      />
+    </div>
+  );
+}
