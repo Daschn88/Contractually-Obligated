@@ -1,0 +1,174 @@
+'use client';
+
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import useSWR from 'swr';
+import {
+  SleeperLeague,
+  SleeperUser,
+  SleeperRoster,
+  SleeperPlayer,
+  SleeperTransaction,
+  PlayerContract,
+  TeamCapSummary
+} from '@/types/sleeper';
+
+const fetcher = (url: string) => fetch(url).then((res) => res.json());
+
+export function useSleeperData(initialLeagueId: string = '1390928660898271232') {
+  const [leagueId, setLeagueId] = useState(initialLeagueId);
+  const [totalCap, setTotalCap] = useState<number>(200);
+  const [minFaSalary, setMinFaSalary] = useState<number>(1);
+  const [manualOverrides, setManualOverrides] = useState<Record<string, number>>({});
+  const [currentRound, setCurrentRound] = useState<number>(1);
+
+  // Load manual overrides from localStorage
+  useEffect(() => {
+    const savedOverrides = localStorage.getItem(`cap_overrides_${leagueId}`);
+    const savedCap = localStorage.getItem(`total_cap_${leagueId}`);
+    if (savedOverrides) setManualOverrides(JSON.parse(savedOverrides));
+    if (savedCap) setTotalCap(Number(savedCap));
+  }, [leagueId]);
+
+  // Save manual overrides
+  const updatePlayerSalary = (playerId: string, newSalary: number) => {
+    setManualOverrides((prev) => {
+      const next = { ...prev, [playerId]: newSalary };
+      localStorage.setItem(`cap_overrides_${leagueId}`, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const updateLeagueCap = (newCap: number) => {
+    setTotalCap(newCap);
+    localStorage.setItem(`total_cap_${leagueId}`, newCap.toString());
+  };
+
+  // Base Data Fetching
+  const { data: league, error: leagueErr } = useSWR<SleeperLeague>(
+    `https://api.sleeper.app/v1/league/${leagueId}`,
+    fetcher
+  );
+  const { data: users } = useSWR<SleeperUser[]>(
+    leagueId ? `https://api.sleeper.app/v1/league/${leagueId}/users` : null,
+    fetcher
+  );
+  const { data: rosters, mutate: mutateRosters } = useSWR<SleeperRoster[]>(
+    leagueId ? `https://api.sleeper.app/v1/league/${leagueId}/rosters` : null,
+    fetcher
+  );
+  const { data: nflPlayers } = useSWR<Record<string, SleeperPlayer>>(
+    '/api/players',
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+
+  // Poll weekly transactions every 30s
+  const { data: transactions } = useSWR<SleeperTransaction[]>(
+    leagueId ? `https://api.sleeper.app/v1/league/${leagueId}/transactions/${currentRound}` : null,
+    fetcher,
+    { refreshInterval: 30000, onSuccess: () => mutateRosters() }
+  );
+
+  // Build a map of transaction-derived acquisition salaries
+  const playerAcquisitions = useMemo(() => {
+    const map = new Map<string, { salary: number; source: 'Waiver' | 'Free Agency' }>();
+    if (!transactions) return map;
+
+    // Process from oldest to newest to ensure latest transaction state
+    const sortedTx = [...transactions].sort((a, b) => a.created - b.created);
+    for (const tx of sortedTx) {
+      if (tx.status === 'complete' && tx.adds) {
+        const waiverBid = tx.settings?.waiver_bid ?? 0;
+        const source = tx.type === 'waiver' ? 'Waiver' : 'Free Agency';
+        const salary = source === 'Waiver' && waiverBid > 0 ? waiverBid : minFaSalary;
+
+        Object.keys(tx.adds).forEach((playerId) => {
+          map.set(playerId, { salary, source });
+        });
+      }
+    }
+    return map;
+  }, [transactions, minFaSalary]);
+
+  // Aggregate Teams and calculate dynamic salary caps
+  const teams: TeamCapSummary[] = useMemo(() => {
+    if (!rosters || !users || !nflPlayers) return [];
+
+    const userMap = new Map(users.map((u) => [u.user_id, u]));
+
+    return rosters.map((roster) => {
+      const owner = userMap.get(roster.owner_id);
+      const teamName = owner?.metadata?.team_name || owner?.display_name || `Team ${roster.roster_id}`;
+      const avatarUrl = owner?.avatar
+        ? `https://sleepercdn.com/avatars/thumbs/${owner.avatar}`
+        : 'https://sleepercdn.com/images/v2/icons/player_default.webp';
+
+      const rosterPlayerIds = roster.players || [];
+      const contracts: PlayerContract[] = rosterPlayerIds.map((playerId) => {
+        const playerInfo = nflPlayers[playerId] || {
+          player_id: playerId,
+          first_name: 'Unknown',
+          last_name: 'Player',
+          position: 'N/A',
+          team: 'FA',
+          status: 'Active'
+        };
+
+        let salary = minFaSalary;
+        let acquiredVia: PlayerContract['acquiredVia'] = 'Draft';
+
+        if (manualOverrides[playerId] !== undefined) {
+          salary = manualOverrides[playerId];
+          acquiredVia = 'Manual Override';
+        } else if (playerAcquisitions.has(playerId)) {
+          const acq = playerAcquisitions.get(playerId)!;
+          salary = acq.salary;
+          acquiredVia = acq.source;
+        }
+
+        const isReserve = roster.reserve?.includes(playerId) ?? false;
+
+        return {
+          playerId,
+          player: playerInfo,
+          salary,
+          acquiredVia,
+          status: isReserve ? 'Reserve' : 'Active'
+        };
+      });
+
+      const capSpent = contracts.reduce((sum, c) => sum + c.salary, 0);
+      const capRemaining = totalCap - capSpent;
+      const capUtilization = totalCap > 0 ? (capSpent / totalCap) * 100 : 0;
+
+      return {
+        rosterId: roster.roster_id,
+        ownerId: roster.owner_id,
+        teamName,
+        managerName: owner?.display_name || 'Unknown Manager',
+        avatarUrl,
+        rosterCount: rosterPlayerIds.length,
+        capSpent,
+        capRemaining,
+        capUtilization,
+        contracts
+      };
+    });
+  }, [rosters, users, nflPlayers, manualOverrides, playerAcquisitions, totalCap, minFaSalary]);
+
+  return {
+    league,
+    teams,
+    transactions: transactions || [],
+    isLoading: !rosters || !users || !nflPlayers,
+    isError: !!leagueErr,
+    totalCap,
+    setTotalCap: updateLeagueCap,
+    minFaSalary,
+    setMinFaSalary,
+    currentRound,
+    setCurrentRound,
+    updatePlayerSalary,
+    setLeagueId
+  };
+}
