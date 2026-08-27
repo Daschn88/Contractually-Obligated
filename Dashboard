@@ -1,0 +1,138 @@
+'use client';
+
+import { useState } from 'react';
+import { useSleeperData } from '@/hooks/useSleeperData';
+import { LeagueOverview } from '@/components/LeagueOverview';
+import { RosterDetail } from '@/components/RosterDetail';
+import { TransactionTicker } from '@/components/TransactionTicker';
+import { LoadingSkeleton } from '@/components/LoadingSkeleton';
+import { EditSalaryModal, SettingsModal } from '@/components/EditSalaryModal';
+import { TeamCapSummary } from '@/types/sleeper';
+
+export default function Dashboard() {
+  const {
+    league,
+    teams,
+    transactions,
+    isLoading,
+    totalCap,
+    setTotalCap,
+    minFaSalary,
+    setMinFaSalary,
+    currentRound,
+    setCurrentRound,
+    updatePlayerSalary
+  } = useSleeperData('1390928660898271232');
+
+  const [selectedTeam, setSelectedTeam] = useState<TeamCapSummary | null>(null);
+  const [editingPlayer, setEditingPlayer] = useState<{
+    id: string;
+    name: string;
+    salary: number;
+  } | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Sync selected team state if team arrays update via polling
+  const activeTeam = selectedTeam
+    ? teams.find((t) => t.rosterId === selectedTeam.rosterId) || selectedTeam
+    : teams[0];
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 font-sans">
+      {/* Top Navbar */}
+      <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-indigo-600 rounded-lg flex items-center justify-center font-black text-white shadow-lg shadow-indigo-500/20">
+              $
+            </div>
+            <div>
+              <h1 className="text-base font-bold text-white tracking-tight">
+                {league?.name || 'Sleeper Salary Cap Tracker'}
+              </h1>
+              <p className="text-[11px] text-slate-400 font-medium">Season {league?.season || '2024'}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:flex items-center bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-lg text-xs gap-2">
+              <span className="text-slate-400">Default Cap:</span>
+              <span className="font-mono font-bold text-indigo-400">${totalCap}</span>
+            </div>
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold rounded-lg text-slate-200 transition-colors"
+            >
+              Settings
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {isLoading ? (
+          <LoadingSkeleton />
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+            {/* Left Column: League Overview & Detailed Roster */}
+            <div className="lg:col-span-3 space-y-8">
+              <section>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-lg font-bold text-slate-200">League Standings & Cap Health</h2>
+                  <span className="text-xs text-slate-500">{teams.length} Active Rosters</span>
+                </div>
+                <LeagueOverview
+                  teams={teams}
+                  onSelectTeam={(team) => setSelectedTeam(team)}
+                  selectedRosterId={activeTeam?.rosterId}
+                />
+              </section>
+
+              {activeTeam && (
+                <section>
+                  <RosterDetail
+                    team={activeTeam}
+                    onEditPlayerSalary={(id, salary, name) =>
+                      setEditingPlayer({ id, name, salary })
+                    }
+                  />
+                </section>
+              )}
+            </div>
+
+            {/* Right Column: Live Transactions Feed */}
+            <div className="lg:col-span-1">
+              <TransactionTicker transactions={transactions} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Edit Salary Modal */}
+      {editingPlayer && (
+        <EditSalaryModal
+          isOpen={!!editingPlayer}
+          playerName={editingPlayer.name}
+          currentSalary={editingPlayer.salary}
+          onClose={() => setEditingPlayer(null)}
+          onSave={(newSalary) => updatePlayerSalary(editingPlayer.id, newSalary)}
+        />
+      )}
+
+      {/* League Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        totalCap={totalCap}
+        minFaSalary={minFaSalary}
+        currentRound={currentRound}
+        onClose={() => setIsSettingsOpen(false)}
+        onSave={(newCap, newMinFa, newRound) => {
+          setTotalCap(newCap);
+          setMinFaSalary(newMinFa);
+          setCurrentRound(newRound);
+        }}
+      />
+    </main>
+  );
+}
