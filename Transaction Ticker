@@ -1,0 +1,72 @@
+import { SleeperTransaction } from '@/types/sleeper';
+
+interface TransactionTickerProps {
+  transactions: SleeperTransaction[];
+}
+
+export function TransactionTicker({ transactions }: TransactionTickerProps) {
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 h-full flex flex-col">
+      <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+        <h3 className="text-sm font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          Live Transactions
+        </h3>
+        <span className="text-xs text-slate-500">Every 30s</span>
+      </div>
+
+      <div className="overflow-y-auto space-y-3 flex-1 pr-1 max-h-[600px]">
+        {transactions.length === 0 ? (
+          <p className="text-xs text-slate-500 text-center py-6">No recent transactions this week.</p>
+        ) : (
+          transactions.map((tx) => {
+            const date = new Date(tx.created).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit'
+            });
+            const waiverBid = tx.settings?.waiver_bid;
+
+            return (
+              <div
+                key={tx.transaction_id}
+                className="p-3 bg-slate-950/60 rounded-lg border border-slate-800/80 hover:border-slate-700 transition-colors text-xs"
+              >
+                <div className="flex justify-between items-center mb-1.5">
+                  <span
+                    className={`font-bold px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider ${
+                      tx.type === 'waiver'
+                        ? 'bg-cyan-950 text-cyan-400 border border-cyan-800'
+                        : tx.type === 'trade'
+                        ? 'bg-purple-950 text-purple-400 border border-purple-800'
+                        : 'bg-slate-800 text-slate-300 border border-slate-700'
+                    }`}
+                  >
+                    {tx.type}
+                  </span>
+                  <span className="text-slate-500 text-[11px]">{date}</span>
+                </div>
+
+                {tx.adds && (
+                  <div className="text-slate-300">
+                    <span className="text-emerald-400 font-semibold">ADD: </span>
+                    {Object.keys(tx.adds).join(', ')}
+                    {waiverBid !== undefined && waiverBid > 0 && (
+                      <span className="text-slate-400 ml-1 font-mono">(${waiverBid} FAAB)</span>
+                    )}
+                  </div>
+                )}
+
+                {tx.drops && (
+                  <div className="text-slate-400 mt-1">
+                    <span className="text-red-400 font-semibold">DROP: </span>
+                    {Object.keys(tx.drops).join(', ')}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
